@@ -440,6 +440,26 @@ class Parser {
       if (!parse_expression(tmpl, closing)) {
         return false;
       }
+    } else if (tok.text == static_cast<decltype(tok.text)>("elif")) {
+      // Handle elif as a direct alternative to else if
+      if (if_statement_stack.empty()) {
+        throw_parser_error("elif without matching if");
+      }
+      auto& if_statement_data = if_statement_stack.top();
+      get_next_token();
+
+      if_statement_data->has_false_statement = true;
+      current_block = &if_statement_data->false_statement;
+
+      auto if_statement_node = std::make_shared<IfStatementNode>(true, current_block, tok.text.data() - tmpl.content.c_str());
+      current_block->nodes.emplace_back(if_statement_node);
+      if_statement_stack.emplace(if_statement_node.get());
+      current_block = &if_statement_node->true_statement;
+      current_expression_list = &if_statement_node->condition;
+
+      if (!parse_expression(tmpl, closing)) {
+        return false;
+      }
     } else if (tok.text == static_cast<decltype(tok.text)>("else")) {
       if (if_statement_stack.empty()) {
         throw_parser_error("else without matching if");
@@ -603,6 +623,68 @@ class Parser {
       if (!parse_expression(tmpl, closing)) {
         return false;
       }
+    } else if (tok.text == static_cast<decltype(tok.text)>("raw")) {
+      // For raw blocks, we need to capture literal content without parsing
+      // First, consume the closing %} of {% raw %}
+      get_next_token();
+      if (tok.kind != closing) {
+        throw_parser_error("expected statement close after 'raw'");
+      }
+      
+      // Now manually find {% endraw %} in the template content
+      const char* raw_start = tok.text.data() + tok.text.size();  // Start after %}
+      const char* search_pos = raw_start;
+      const char* content_end = tmpl.content.c_str() + tmpl.content.size();
+      const char* endraw_pos = nullptr;
+      
+      // Search for {% endraw
+      while (search_pos < content_end - 10) {  // Need at least 10 chars for "{% endraw"
+        if (search_pos[0] == '{' && search_pos[1] == '%') {
+          // Check if this is "endraw"
+          const char* check = search_pos + 2;
+          // Skip whitespace
+          while (check < content_end && (*check == ' ' || *check == '\t')) check++;
+          // Check for "endraw"
+          if (check + 6 <= content_end && 
+              check[0] == 'e' && check[1] == 'n' && check[2] == 'd' && 
+              check[3] == 'r' && check[4] == 'a' && check[5] == 'w') {
+            endraw_pos = search_pos;
+            break;
+          }
+        }
+        search_pos++;
+      }
+      
+      if (!endraw_pos) {
+        throw_parser_error("unmatched raw");
+      }
+      
+      // Create raw statement node with the captured content
+      const size_t content_pos = raw_start - tmpl.content.c_str();
+      const size_t content_length = endraw_pos - raw_start;
+      auto raw_statement_node = std::make_shared<RawStatementNode>(
+          content_pos, content_pos, content_length);
+      current_block->nodes.emplace_back(raw_statement_node);
+      
+      // Now we need to advance the lexer past {% endraw %}
+      // Scan through tokens until we find "endraw"
+      bool found_endraw = false;
+      while (!found_endraw) {
+        get_next_token();
+        if (tok.kind == Token::Kind::Eof) {
+          throw_parser_error("unmatched raw");
+        }
+        if (tok.kind == Token::Kind::Id && tok.text == static_cast<decltype(tok.text)>("endraw")) {
+          found_endraw = true;
+          get_next_token();  // Consume the closing %}
+          if (tok.kind != Token::Kind::StatementClose && tok.kind != Token::Kind::LineStatementClose) {
+            throw_parser_error("expected statement close after 'endraw'");
+          }
+        }
+      }
+    } else if (tok.text == static_cast<decltype(tok.text)>("endraw")) {
+      // endraw without matching raw
+      throw_parser_error("endraw without matching raw");
     } else {
       return false;
     }
@@ -623,9 +705,9 @@ class Parser {
         if (!for_statement_stack.empty()) {
           throw_parser_error("unmatched for");
         }
-      }
         current_block = nullptr;
         return;
+      }
       case Token::Kind::Text: {
         current_block->nodes.emplace_back(std::make_shared<TextNode>(tok.text.data() - tmpl.content.c_str(), tok.text.size()));
       } break;

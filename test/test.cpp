@@ -11,6 +11,7 @@
 #include "test-renderer.cpp"
 #include "test-units.cpp"
 #include "test-graceful-errors.cpp"
+#include "test-elif-raw.cpp"
 
 #define xstr(s) str(s)
 #define str(s) #s

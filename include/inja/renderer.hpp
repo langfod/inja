@@ -712,6 +712,11 @@ class Renderer : public NodeVisitor {
     additional_data[json::json_pointer(ptr)] = *eval_expression_list(node.expression);
   }
 
+  void visit(const RawStatementNode& node) override {
+    // Output raw content without any parsing or processing
+    output_stream->write(current_template->content.c_str() + node.content_pos, node.content_length);
+  }
+
 public:
   explicit Renderer(const RenderConfig& config, const TemplateStorage& template_storage, const FunctionStorage& function_storage)
       : config(config), template_storage(template_storage), function_storage(function_storage) {}

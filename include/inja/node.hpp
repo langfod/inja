@@ -31,6 +31,7 @@ class IncludeStatementNode;
 class ExtendsStatementNode;
 class BlockStatementNode;
 class SetStatementNode;
+class RawStatementNode;
 
 class NodeVisitor {
 public:
@@ -52,6 +53,7 @@ public:
   virtual void visit(const ExtendsStatementNode& node) = 0;
   virtual void visit(const BlockStatementNode& node) = 0;
   virtual void visit(const SetStatementNode& node) = 0;
+  virtual void visit(const RawStatementNode& node) = 0;
 };
 
 /*!
@@ -366,6 +368,19 @@ public:
   ExpressionListNode expression;
 
   explicit SetStatementNode(const std::string& key, size_t pos): StatementNode(pos), key(key) {}
+
+  void accept(NodeVisitor& v) const override {
+    v.visit(*this);
+  }
+};
+
+class RawStatementNode : public StatementNode {
+public:
+  const size_t content_pos;
+  const size_t content_length;
+
+  explicit RawStatementNode(size_t pos, size_t content_pos, size_t content_length): 
+      StatementNode(pos), content_pos(content_pos), content_length(content_length) {}
 
   void accept(NodeVisitor& v) const override {
     v.visit(*this);
