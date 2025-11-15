@@ -40,7 +40,7 @@ struct NotFoundInfo {
 */
 inline std::string htmlescape(const std::string& data) {
   std::string buffer;
-  buffer.reserve((unsigned int)(1.1 * data.size()));
+  buffer.reserve(static_cast<size_t>(1.1 * data.size()));
   for (size_t pos = 0; pos != data.size(); ++pos) {
     switch (data[pos]) {
       case '&':  buffer.append("&amp;");       break;
@@ -142,7 +142,7 @@ class Renderer : public NodeVisitor {
     const auto result = data_eval_stack.top();
     data_eval_stack.pop();
 
-    if (!result) {
+    if (result == nullptr) {
       if (not_found_stack.empty()) {
         std::string original_text;
         if (config.graceful_errors && expression_list.length > 0) {
@@ -237,7 +237,7 @@ class Renderer : public NodeVisitor {
     return result;
   }
 
-  void visit(const BlockNode& node) {
+  void visit(const BlockNode& node) override {
     for (const auto& n : node.nodes) {
       n->accept(*this);
 
@@ -247,17 +247,17 @@ class Renderer : public NodeVisitor {
     }
   }
 
-  void visit(const TextNode& node) {
+  void visit(const TextNode& node) override {
     output_stream->write(current_template->content.c_str() + node.pos, node.length);
   }
 
-  void visit(const ExpressionNode&) {}
+  void visit(const ExpressionNode&) override {}
 
-  void visit(const LiteralNode& node) {
+  void visit(const LiteralNode& node) override {
     data_eval_stack.push(&node.value);
   }
 
-  void visit(const DataNode& node) {
+  void visit(const DataNode& node) override {
     if (additional_data.contains(node.ptr)) {
       data_eval_stack.push(&(additional_data[node.ptr]));
     } else if (data_input->contains(node.ptr)) {
@@ -277,7 +277,7 @@ class Renderer : public NodeVisitor {
     }
   }
 
-  void visit(const FunctionNode& node) {
+  void visit(const FunctionNode& node) override {
     switch (node.operation) {
     case Op::Not: {
       const auto args = get_arguments<1>(node);
@@ -391,7 +391,7 @@ class Renderer : public NodeVisitor {
     } break;
     case Op::Default: {
       const auto test_arg = get_arguments<1, 0, false>(node)[0];
-      data_eval_stack.push(test_arg ? test_arg : get_arguments<1, 1>(node)[0]);
+      data_eval_stack.push((test_arg != nullptr) ? test_arg : get_arguments<1, 1>(node)[0]);
     } break;
     case Op::DivisibleBy: {
       const auto args = get_arguments<2>(node);
@@ -455,12 +455,18 @@ class Renderer : public NodeVisitor {
       std::iota(result.begin(), result.end(), 0);
       make_result(std::move(result));
     } break;
+    case Op::Replace: {
+      const auto args = get_arguments<3>(node);
+      auto result = args[0]->get<std::string>();
+      replace_substring(result, args[1]->get<std::string>(), args[2]->get<std::string>());
+      make_result(std::move(result));
+    } break;
     case Op::Round: {
       const auto args = get_arguments<2>(node);
       const auto precision = args[1]->get<const json::number_integer_t>();
       const double result = std::round(args[0]->get<const json::number_float_t>() * std::pow(10.0, precision)) / std::pow(10.0, precision);
       if (precision == 0) {
-        make_result(int(result));
+        make_result(static_cast<int>(result));
       } else {
         make_result(result);
       }
@@ -563,21 +569,15 @@ class Renderer : public NodeVisitor {
     }
   }
 
-  void visit(const ExpressionListNode& node) {
-    auto result = eval_expression_list(node);
-    if (result) {
-      print_data(result);
-    } else if (config.graceful_errors && node.length > 0) {
-      // In graceful mode, output the original template text
-      *output_stream << current_template->content.substr(node.pos, node.length);
-    }
+  void visit(const ExpressionListNode& node) override {
+    print_data(eval_expression_list(node));
   }
 
-  void visit(const StatementNode&) {}
+  void visit(const StatementNode&) override {}
 
-  void visit(const ForStatementNode&) {}
+  void visit(const ForStatementNode&) override {}
 
-  void visit(const ForArrayStatementNode& node) {
+  void visit(const ForArrayStatementNode& node) override {
     const auto result = eval_expression_list(node.condition);
     if (!result->is_array()) {
       throw_renderer_error("object must be an array", node);
@@ -610,13 +610,13 @@ class Renderer : public NodeVisitor {
     additional_data[static_cast<std::string>(node.value)].clear();
     if (!(*current_loop_data)["parent"].empty()) {
       const auto tmp = (*current_loop_data)["parent"];
-      *current_loop_data = std::move(tmp);
+      *current_loop_data = tmp;
     } else {
       current_loop_data = &additional_data["loop"];
     }
   }
 
-  void visit(const ForObjectStatementNode& node) {
+  void visit(const ForObjectStatementNode& node) override {
     const auto result = eval_expression_list(node.condition);
     if (!result->is_object()) {
       throw_renderer_error("object must be an object", node);
@@ -655,7 +655,7 @@ class Renderer : public NodeVisitor {
     }
   }
 
-  void visit(const IfStatementNode& node) {
+  void visit(const IfStatementNode& node) override {
     const auto result = eval_expression_list(node.condition);
     if (truthy(result.get())) {
       node.true_statement.accept(*this);
@@ -664,7 +664,7 @@ class Renderer : public NodeVisitor {
     }
   }
 
-  void visit(const IncludeStatementNode& node) {
+  void visit(const IncludeStatementNode& node) override {
     auto sub_renderer = Renderer(config, template_storage, function_storage);
     const auto included_template_it = template_storage.find(node.file);
     if (included_template_it != template_storage.end()) {
@@ -674,7 +674,7 @@ class Renderer : public NodeVisitor {
     }
   }
 
-  void visit(const ExtendsStatementNode& node) {
+  void visit(const ExtendsStatementNode& node) override {
     const auto included_template_it = template_storage.find(node.file);
     if (included_template_it != template_storage.end()) {
       const Template* parent_template = &included_template_it->second;
@@ -685,7 +685,7 @@ class Renderer : public NodeVisitor {
     }
   }
 
-  void visit(const BlockStatementNode& node) {
+  void visit(const BlockStatementNode& node) override {
     const size_t old_level = current_level;
     current_level = 0;
     current_template = template_stack.front();
@@ -699,7 +699,7 @@ class Renderer : public NodeVisitor {
     current_template = template_stack.back();
   }
 
-  void visit(const SetStatementNode& node) {
+  void visit(const SetStatementNode& node) override {
     std::string ptr = node.key;
     replace_substring(ptr, ".", "/");
     ptr = "/" + ptr;
@@ -707,14 +707,14 @@ class Renderer : public NodeVisitor {
   }
 
 public:
-  Renderer(const RenderConfig& config, const TemplateStorage& template_storage, const FunctionStorage& function_storage)
+  explicit Renderer(const RenderConfig& config, const TemplateStorage& template_storage, const FunctionStorage& function_storage)
       : config(config), template_storage(template_storage), function_storage(function_storage) {}
 
   void render_to(std::ostream& os, const Template& tmpl, const json& data, json* loop_data = nullptr) {
     output_stream = &os;
     current_template = &tmpl;
     data_input = &data;
-    if (loop_data) {
+    if (loop_data != nullptr) {
       additional_data = *loop_data;
       current_loop_data = &additional_data["loop"];
     }

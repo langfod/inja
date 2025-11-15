@@ -212,6 +212,9 @@ render("Hello {{ upper(neighbour) }}!", data); // "Hello PETER!"
 render("Hello {{ lower(neighbour) }}!", data); // "Hello peter!"
 render("Hello {{ capitalize(neighbour) }}!", data); // "Hello Peter!"
 
+// Replace characters in a string
+render("{{ replace(neighbour, \"e\", \"3\")}}", data); // "P3t3r"
+
 // Range function, useful for loops
 render("{% for i in range(4) %}{{ loop.index1 }}{% endfor %}", data); // "1234"
 render("{% for i in range(3) %}{{ at(guests, i) }} {% endfor %}", data); // "Jeff Tom Patrick "
@@ -265,6 +268,16 @@ render("{{ existsIn(time, neighbour) }}", data); // "false"
 render("{{ isString(neighbour) }}", data); // "true"
 render("{{ isArray(guests) }}", data); // "true"
 // Implemented type checks: isArray, isBoolean, isFloat, isInteger, isNumber, isObject, isString,
+```
+
+The Jinja2 pipe call syntax of functions is also supported:
+
+```.cpp
+// Upper neighbour value
+render("Hello {{ neighbour | upper }}!", data); // "Hello PETER!"
+
+// Sort array and join with comma
+render("{{ [\"B\", \"A\", \"C\"] | sort | join(\",\") }}", data); // "A,B,C"
 ```
 
 ### Callbacks

@@ -48,11 +48,11 @@ class Parser {
   std::stack<ForStatementNode*> for_statement_stack;
   std::stack<BlockStatementNode*> block_statement_stack;
 
-  inline void throw_parser_error(const std::string& message) const {
+  void throw_parser_error(const std::string& message) const {
     INJA_THROW(ParserError(message, lexer.current_position()));
   }
 
-  inline void get_next_token() {
+  void get_next_token() {
     if (have_peek_tok) {
       tok = peek_tok;
       have_peek_tok = false;
@@ -61,19 +61,19 @@ class Parser {
     }
   }
 
-  inline void get_peek_token() {
+  void get_peek_token() {
     if (!have_peek_tok) {
       peek_tok = lexer.scan();
       have_peek_tok = true;
     }
   }
 
-  inline void add_literal(Arguments &arguments, const char* content_ptr) {
+  void add_literal(Arguments &arguments, const char* content_ptr) {
     const std::string_view data_text(literal_start.data(), tok.text.data() - literal_start.data() + tok.text.size());
     arguments.emplace_back(std::make_shared<LiteralNode>(data_text, data_text.data() - content_ptr));
   }
 
-  inline void add_operator(Arguments &arguments, OperatorStack &operator_stack) {
+  void add_operator(Arguments &arguments, OperatorStack &operator_stack) {
     auto function = operator_stack.top();
     operator_stack.pop();
 
@@ -355,6 +355,47 @@ class Parser {
         }
         arguments.emplace_back(expr);
       } break;
+
+      // parse function call pipe syntax
+      case Token::Kind::Pipe: {
+        // get function name
+        get_next_token();
+        if (tok.kind != Token::Kind::Id) {
+          throw_parser_error("expected function name, got '" + tok.describe() + "'");
+        }
+        auto func = std::make_shared<FunctionNode>(tok.text, tok.text.data() - tmpl.content.c_str());
+        // add first parameter as last value from arguments
+        func->number_args += 1;
+        func->arguments.emplace_back(arguments.back());
+        arguments.pop_back();
+        get_peek_token();
+        if (peek_tok.kind == Token::Kind::LeftParen) {
+          get_next_token();
+          // parse additional parameters
+          do {
+            get_next_token();
+            auto expr = parse_expression(tmpl);
+            if (!expr) {
+              break;
+            }
+            func->number_args += 1;
+            func->arguments.emplace_back(expr);
+          } while (tok.kind == Token::Kind::Comma);
+          if (tok.kind != Token::Kind::RightParen) {
+            throw_parser_error("expected right parenthesis, got '" + tok.describe() + "'");
+          }
+        }
+        // search store for defined function with such name and number of args
+        auto function_data = function_storage.find_function(func->name, func->number_args);
+        if (function_data.operation == FunctionStorage::Operation::None) {
+          throw_parser_error("unknown function " + func->name);
+        }
+        func->operation = function_data.operation;
+        if (function_data.operation == FunctionStorage::Operation::Callback) {
+          func->callback = function_data.callback;
+        }
+        arguments.emplace_back(func);
+      } break;
       default:
         goto break_loop;
       }
@@ -481,7 +522,7 @@ class Parser {
           throw_parser_error("expected id, got '" + tok.describe() + "'");
         }
 
-        const Token key_token = std::move(value_token);
+        const Token key_token = value_token;
         value_token = tok;
         get_next_token();
 
@@ -636,13 +677,13 @@ public:
                   const FunctionStorage& function_storage)
       : config(parser_config), lexer(lexer_config), template_storage(template_storage), function_storage(function_storage) {}
 
-  Template parse(std::string_view input, std::filesystem::path path) {
+  Template parse(std::string_view input, const std::filesystem::path& path) {
     auto result = Template(std::string(input));
     parse_into(result, path);
     return result;
   }
 
-  void parse_into_template(Template& tmpl, std::filesystem::path filename) {
+  void parse_into_template(Template& tmpl, const std::filesystem::path& filename) {
     auto sub_parser = Parser(config, lexer.get_config(), template_storage, function_storage);
     sub_parser.parse_into(tmpl, filename.parent_path());
   }
