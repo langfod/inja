@@ -208,11 +208,13 @@ class Renderer : public NodeVisitor {
 
         if (throw_not_found) {
           throw_renderer_error("variable '" + not_found.name + "' not found", *not_found.node);
-          // In graceful error mode, provide a safe default instead of nullptr
-          if (config.graceful_errors) {
-            static const json empty_json;
-            result[N - i - 1] = &empty_json;
-          }
+        }
+        
+        // In graceful error mode, always provide a safe default instead of nullptr
+        // This prevents null pointer dereferences even when throw_not_found is false
+        if (config.graceful_errors) {
+          static const json empty_json;
+          result[N - i - 1] = &empty_json;
         }
       }
     }
@@ -240,11 +242,13 @@ class Renderer : public NodeVisitor {
 
         if (throw_not_found) {
           throw_renderer_error("variable '" + not_found.name + "' not found", *not_found.node);
-          // In graceful error mode, provide a safe default instead of nullptr
-          if (config.graceful_errors) {
-            static const json empty_json;
-            result[N - i - 1] = &empty_json;
-          }
+        }
+        
+        // In graceful error mode, always provide a safe default instead of nullptr
+        // This prevents null pointer dereferences even when throw_not_found is false
+        if (config.graceful_errors) {
+          static const json empty_json;
+          result[N - i - 1] = &empty_json;
         }
       }
     }
@@ -291,6 +295,25 @@ class Renderer : public NodeVisitor {
     }
   }
 
+  // Helper macro for graceful error handling in operations
+  #define INJA_OP_TRY_BEGIN try {
+  #define INJA_OP_TRY_END_GRACEFUL(op_name) \
+    } catch (const std::exception& e) { \
+      if (config.graceful_errors) { \
+        data_eval_stack.push(nullptr); \
+        not_found_stack.emplace(op_name, &node); \
+      } else { \
+        throw_renderer_error(std::string("operation '") + op_name + "' failed: " + e.what(), node); \
+      } \
+    } catch (...) { \
+      if (config.graceful_errors) { \
+        data_eval_stack.push(nullptr); \
+        not_found_stack.emplace(op_name, &node); \
+      } else { \
+        throw_renderer_error(std::string("operation '") + op_name + "' failed with unknown exception", node); \
+      } \
+    }
+
   void visit(const FunctionNode& node) override {
     switch (node.operation) {
     case Op::Not: {
@@ -332,30 +355,36 @@ class Renderer : public NodeVisitor {
       make_result(*args[0] <= *args[1]);
     } break;
     case Op::Add: {
-      const auto args = get_arguments<2>(node);
-      if (args[0]->is_string() && args[1]->is_string()) {
-        make_result(args[0]->get_ref<const json::string_t&>() + args[1]->get_ref<const json::string_t&>());
-      } else if (args[0]->is_number_integer() && args[1]->is_number_integer()) {
-        make_result(args[0]->get<const json::number_integer_t>() + args[1]->get<const json::number_integer_t>());
-      } else {
-        make_result(args[0]->get<const json::number_float_t>() + args[1]->get<const json::number_float_t>());
-      }
+      INJA_OP_TRY_BEGIN
+        const auto args = get_arguments<2>(node);
+        if (args[0]->is_string() && args[1]->is_string()) {
+          make_result(args[0]->get_ref<const json::string_t&>() + args[1]->get_ref<const json::string_t&>());
+        } else if (args[0]->is_number_integer() && args[1]->is_number_integer()) {
+          make_result(args[0]->get<const json::number_integer_t>() + args[1]->get<const json::number_integer_t>());
+        } else {
+          make_result(args[0]->get<const json::number_float_t>() + args[1]->get<const json::number_float_t>());
+        }
+      INJA_OP_TRY_END_GRACEFUL("add")
     } break;
     case Op::Subtract: {
-      const auto args = get_arguments<2>(node);
-      if (args[0]->is_number_integer() && args[1]->is_number_integer()) {
-        make_result(args[0]->get<const json::number_integer_t>() - args[1]->get<const json::number_integer_t>());
-      } else {
-        make_result(args[0]->get<const json::number_float_t>() - args[1]->get<const json::number_float_t>());
-      }
+      INJA_OP_TRY_BEGIN
+        const auto args = get_arguments<2>(node);
+        if (args[0]->is_number_integer() && args[1]->is_number_integer()) {
+          make_result(args[0]->get<const json::number_integer_t>() - args[1]->get<const json::number_integer_t>());
+        } else {
+          make_result(args[0]->get<const json::number_float_t>() - args[1]->get<const json::number_float_t>());
+        }
+      INJA_OP_TRY_END_GRACEFUL("subtract")
     } break;
     case Op::Multiplication: {
-      const auto args = get_arguments<2>(node);
-      if (args[0]->is_number_integer() && args[1]->is_number_integer()) {
-        make_result(args[0]->get<const json::number_integer_t>() * args[1]->get<const json::number_integer_t>());
-      } else {
-        make_result(args[0]->get<const json::number_float_t>() * args[1]->get<const json::number_float_t>());
-      }
+      INJA_OP_TRY_BEGIN
+        const auto args = get_arguments<2>(node);
+        if (args[0]->is_number_integer() && args[1]->is_number_integer()) {
+          make_result(args[0]->get<const json::number_integer_t>() * args[1]->get<const json::number_integer_t>());
+        } else {
+          make_result(args[0]->get<const json::number_float_t>() * args[1]->get<const json::number_float_t>());
+        }
+      INJA_OP_TRY_END_GRACEFUL("multiply")
     } break;
     case Op::Division: {
       const auto args = get_arguments<2>(node);
@@ -387,21 +416,80 @@ class Renderer : public NodeVisitor {
       const auto not_found = not_found_stack.top();
       not_found_stack.pop();
       data_eval_stack.pop();
-      data_eval_stack.push(&container->at(not_found.name));
+      
+      // Safe access with graceful error handling
+      try {
+        if (container && container->contains(not_found.name)) {
+          data_eval_stack.push(&container->at(not_found.name));
+        } else {
+          // Member not found
+          if (config.graceful_errors) {
+            data_eval_stack.push(nullptr);
+            not_found_stack.push(not_found);
+          } else {
+            throw_renderer_error("member '" + not_found.name + "' not found in container", node);
+          }
+        }
+      } catch (const std::exception&) {
+        if (config.graceful_errors) {
+          data_eval_stack.push(nullptr);
+          not_found_stack.push(not_found);
+        } else {
+          throw;
+        }
+      }
     } break;
     case Op::At: {
       const auto args = get_arguments<2>(node);
-      if (args[0]->is_object()) {
-        data_eval_stack.push(&args[0]->at(args[1]->get<std::string>()));
-      } else {
-        data_eval_stack.push(&args[0]->at(args[1]->get<int>()));
+      try {
+        if (args[0]->is_object()) {
+          const auto key = args[1]->get<std::string>();
+          if (args[0]->contains(key)) {
+            data_eval_stack.push(&args[0]->at(key));
+          } else {
+            if (config.graceful_errors) {
+              data_eval_stack.push(nullptr);
+              not_found_stack.emplace(key, &node);
+            } else {
+              throw_renderer_error("key '" + key + "' not found in object", node);
+            }
+          }
+        } else if (args[0]->is_array()) {
+          const auto index = args[1]->get<int>();
+          if (index >= 0 && static_cast<size_t>(index) < args[0]->size()) {
+            data_eval_stack.push(&args[0]->at(index));
+          } else {
+            if (config.graceful_errors) {
+              data_eval_stack.push(nullptr);
+              not_found_stack.emplace("index[" + std::to_string(index) + "]", &node);
+            } else {
+              throw_renderer_error("index " + std::to_string(index) + " out of bounds", node);
+            }
+          }
+        } else {
+          if (config.graceful_errors) {
+            data_eval_stack.push(nullptr);
+            not_found_stack.emplace("at", &node);
+          } else {
+            throw_renderer_error("cannot access element on non-container type", node);
+          }
+        }
+      } catch (const std::exception&) {
+        if (config.graceful_errors) {
+          data_eval_stack.push(nullptr);
+          not_found_stack.emplace("at", &node);
+        } else {
+          throw;
+        }
       }
     } break;
     case Op::Capitalize: {
-      auto result = get_arguments<1>(node)[0]->get<json::string_t>();
-      result[0] = static_cast<char>(::toupper(result[0]));
-      std::transform(result.begin() + 1, result.end(), result.begin() + 1, [](char c) { return static_cast<char>(::tolower(c)); });
-      make_result(std::move(result));
+      INJA_OP_TRY_BEGIN
+        auto result = get_arguments<1>(node)[0]->get<json::string_t>();
+        result[0] = static_cast<char>(::toupper(result[0]));
+        std::transform(result.begin() + 1, result.end(), result.begin() + 1, [](char c) { return static_cast<char>(::tolower(c)); });
+        make_result(std::move(result));
+      INJA_OP_TRY_END_GRACEFUL("capitalize")
     } break;
     case Op::Default: {
       const auto test_arg = get_arguments<1, 0, false>(node)[0];
@@ -425,8 +513,20 @@ class Renderer : public NodeVisitor {
       make_result(args[0]->find(name) != args[0]->end());
     } break;
     case Op::First: {
-      const auto result = &get_arguments<1>(node)[0]->front();
-      data_eval_stack.push(result);
+      INJA_OP_TRY_BEGIN
+        const auto arr = get_arguments<1>(node)[0];
+        if (arr->empty()) {
+          if (config.graceful_errors) {
+            data_eval_stack.push(nullptr);
+            not_found_stack.emplace("first", &node);
+          } else {
+            throw_renderer_error("cannot get first element of empty array", node);
+          }
+        } else {
+          const auto result = &arr->front();
+          data_eval_stack.push(result);
+        }
+      INJA_OP_TRY_END_GRACEFUL("first")
     } break;
     case Op::Float: {
       make_result(std::stod(get_arguments<1>(node)[0]->get_ref<const json::string_t&>()));
@@ -435,8 +535,20 @@ class Renderer : public NodeVisitor {
       make_result(std::stoi(get_arguments<1>(node)[0]->get_ref<const json::string_t&>()));
     } break;
     case Op::Last: {
-      const auto result = &get_arguments<1>(node)[0]->back();
-      data_eval_stack.push(result);
+      INJA_OP_TRY_BEGIN
+        const auto arr = get_arguments<1>(node)[0];
+        if (arr->empty()) {
+          if (config.graceful_errors) {
+            data_eval_stack.push(nullptr);
+            not_found_stack.emplace("last", &node);
+          } else {
+            throw_renderer_error("cannot get last element of empty array", node);
+          }
+        } else {
+          const auto result = &arr->back();
+          data_eval_stack.push(result);
+        }
+      INJA_OP_TRY_END_GRACEFUL("last")
     } break;
     case Op::Length: {
       const auto val = get_arguments<1>(node)[0];
@@ -447,9 +559,11 @@ class Renderer : public NodeVisitor {
       }
     } break;
     case Op::Lower: {
-      auto result = get_arguments<1>(node)[0]->get<json::string_t>();
-      std::transform(result.begin(), result.end(), result.begin(), [](char c) { return static_cast<char>(::tolower(c)); });
-      make_result(std::move(result));
+      INJA_OP_TRY_BEGIN
+        auto result = get_arguments<1>(node)[0]->get<json::string_t>();
+        std::transform(result.begin(), result.end(), result.begin(), [](char c) { return static_cast<char>(::tolower(c)); });
+        make_result(std::move(result));
+      INJA_OP_TRY_END_GRACEFUL("lower")
     } break;
     case Op::Max: {
       const auto args = get_arguments<1>(node);
@@ -470,10 +584,12 @@ class Renderer : public NodeVisitor {
       make_result(std::move(result));
     } break;
     case Op::Replace: {
-      const auto args = get_arguments<3>(node);
-      auto result = args[0]->get<std::string>();
-      replace_substring(result, args[1]->get<std::string>(), args[2]->get<std::string>());
-      make_result(std::move(result));
+      INJA_OP_TRY_BEGIN
+        const auto args = get_arguments<3>(node);
+        auto result = args[0]->get<std::string>();
+        replace_substring(result, args[1]->get<std::string>(), args[2]->get<std::string>());
+        make_result(std::move(result));
+      INJA_OP_TRY_END_GRACEFUL("replace")
     } break;
     case Op::Round: {
       const auto args = get_arguments<2>(node);
@@ -492,9 +608,11 @@ class Renderer : public NodeVisitor {
       data_eval_stack.push(result_ptr.get());
     } break;
     case Op::Upper: {
-      auto result = get_arguments<1>(node)[0]->get<json::string_t>();
-      std::transform(result.begin(), result.end(), result.begin(), [](char c) { return static_cast<char>(::toupper(c)); });
-      make_result(std::move(result));
+      INJA_OP_TRY_BEGIN
+        auto result = get_arguments<1>(node)[0]->get<json::string_t>();
+        std::transform(result.begin(), result.end(), result.begin(), [](char c) { return static_cast<char>(::toupper(c)); });
+        make_result(std::move(result));
+      INJA_OP_TRY_END_GRACEFUL("upper")
     } break;
     case Op::IsBoolean: {
       make_result(get_arguments<1>(node)[0]->is_boolean());
@@ -518,10 +636,15 @@ class Renderer : public NodeVisitor {
       make_result(get_arguments<1>(node)[0]->is_string());
     } break;
     case Op::Callback: {
-      if (!node.callback && config.graceful_errors) {
-        // Unknown function without callback in graceful mode
-        data_eval_stack.push(nullptr);
-        not_found_stack.emplace(node.name, &node);
+      if (!node.callback) {
+        // Callback is null - function not found or not registered
+        if (config.graceful_errors) {
+          // Unknown function without callback in graceful mode
+          data_eval_stack.push(nullptr);
+          not_found_stack.emplace(node.name, &node);
+        } else {
+          throw_renderer_error("function '" + node.name + "' not found or has no callback", node);
+        }
       } else {
         auto args = get_argument_vector(node);
         make_result(node.callback(args));
@@ -738,7 +861,32 @@ class Renderer : public NodeVisitor {
     std::string ptr = node.key;
     replace_substring(ptr, ".", "/");
     ptr = "/" + ptr;
-    additional_data[json::json_pointer(ptr)] = *eval_expression_list(node.expression);
+    
+    try {
+      auto result = eval_expression_list(node.expression);
+      if (result) {
+        additional_data[json::json_pointer(ptr)] = *result;
+      } else if (config.graceful_errors) {
+        // In graceful error mode, set to null if expression failed
+        additional_data[json::json_pointer(ptr)] = nullptr;
+      } else {
+        throw_renderer_error("failed to evaluate expression for variable '" + node.key + "'", node);
+      }
+    } catch (const std::exception& e) {
+      if (config.graceful_errors) {
+        // In graceful error mode, set to null on exception
+        additional_data[json::json_pointer(ptr)] = nullptr;
+      } else {
+        throw_renderer_error("failed to set variable '" + node.key + "': " + e.what(), node);
+      }
+    } catch (...) {
+      if (config.graceful_errors) {
+        // Catch all exceptions including SEH
+        additional_data[json::json_pointer(ptr)] = nullptr;
+      } else {
+        throw_renderer_error("failed to set variable '" + node.key + "' with unknown exception", node);
+      }
+    }
   }
 
   void visit(const RawStatementNode& node) override {

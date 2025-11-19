@@ -2487,6 +2487,13 @@ class Renderer : public NodeVisitor {
         if (throw_not_found) {
           throw_renderer_error("variable '" + not_found.name + "' not found", *not_found.node);
         }
+        
+        // In graceful error mode, always provide a safe default instead of nullptr
+        // This prevents null pointer dereferences even when throw_not_found is false
+        if (config.graceful_errors) {
+          static const json empty_json;
+          result[N - i - 1] = &empty_json;
+        }
       }
     }
     return result;
@@ -2513,6 +2520,13 @@ class Renderer : public NodeVisitor {
 
         if (throw_not_found) {
           throw_renderer_error("variable '" + not_found.name + "' not found", *not_found.node);
+        }
+        
+        // In graceful error mode, always provide a safe default instead of nullptr
+        // This prevents null pointer dereferences even when throw_not_found is false
+        if (config.graceful_errors) {
+          static const json empty_json;
+          result[N - i - 1] = &empty_json;
         }
       }
     }
@@ -2786,10 +2800,15 @@ class Renderer : public NodeVisitor {
       make_result(get_arguments<1>(node)[0]->is_string());
     } break;
     case Op::Callback: {
-      if (!node.callback && config.graceful_errors) {
-        // Unknown function without callback in graceful mode
-        data_eval_stack.push(nullptr);
-        not_found_stack.emplace(node.name, &node);
+      if (!node.callback) {
+        // Callback is null - function not found or not registered
+        if (config.graceful_errors) {
+          // Unknown function without callback in graceful mode
+          data_eval_stack.push(nullptr);
+          not_found_stack.emplace(node.name, &node);
+        } else {
+          throw_renderer_error("function '" + node.name + "' not found or has no callback", node);
+        }
       } else {
         auto args = get_argument_vector(node);
         make_result(node.callback(args));
