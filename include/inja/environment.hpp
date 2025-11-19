@@ -18,6 +18,10 @@
 
 namespace inja {
 
+// Forward declaration
+class Environment;
+void register_array_functions(Environment& env);
+
 /*!
  * \brief Class for changing the configuration.
  */
@@ -34,10 +38,21 @@ protected:
   std::filesystem::path input_path;
   std::filesystem::path output_path;
 
+private:
+  void init_default_functions() {
+    register_array_functions(*this);
+  }
+
 public:
   Environment(): Environment("") {}
-  explicit Environment(const std::filesystem::path& global_path): input_path(global_path), output_path(global_path) {}
-  Environment(const std::filesystem::path& input_path, const std::filesystem::path& output_path): input_path(input_path), output_path(output_path) {}
+  
+  explicit Environment(const std::filesystem::path& global_path): input_path(global_path), output_path(global_path) {
+    init_default_functions();
+  }
+  
+  Environment(const std::filesystem::path& input_path, const std::filesystem::path& output_path): input_path(input_path), output_path(output_path) {
+    init_default_functions();
+  }
 
   /// Sets the opener and closer for template statements
   void set_statement(const std::string& open, const std::string& close) {
@@ -260,5 +275,8 @@ inline void render_to(std::ostream& os, std::string_view input, const json& data
 }
 
 } // namespace inja
+
+// Include array functions implementation after Environment is fully defined
+#include "array_functions.hpp"
 
 #endif // INCLUDE_INJA_ENVIRONMENT_HPP_
